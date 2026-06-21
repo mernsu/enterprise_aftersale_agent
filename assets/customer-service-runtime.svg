@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760">
+  <defs>
+    <style>
+      .title{font:700 30px Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#172033}
+      .subtitle{font:16px Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#516179}
+      .label{font:700 18px Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#172033}
+      .small{font:15px Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#31405f}
+      .box{fill:#f7f9fc;stroke:#8aa0c3;stroke-width:2;rx:10}
+      .core{fill:#eef6ff;stroke:#3973b7;stroke-width:3;rx:10}
+      .store{fill:#f7fff4;stroke:#4d9d55;stroke-width:2;rx:10}
+      .tool{fill:#fff8ed;stroke:#d08028;stroke-width:2;rx:10}
+      .line{stroke:#52627a;stroke-width:2;fill:none;marker-end:url(#arrow)}
+      .dash{stroke:#52627a;stroke-width:2;fill:none;stroke-dasharray:7 7;marker-end:url(#arrow)}
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#52627a"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="760" fill="#ffffff"/>
+  <text x="48" y="58" class="title">客服 Agent 运行链路</text>
+  <rect x="56" y="128" width="220" height="88" class="box"/>
+  <text x="78" y="162" class="label">用户请求</text>
+  <text x="78" y="190" class="small">tenant_id / user_id</text>
+  <text x="78" y="212" class="small">question / history</text>
+
+  <rect x="344" y="128" width="220" height="88" class="box"/>
+  <text x="366" y="162" class="label">FastAPI 路由</text>
+  <text x="366" y="190" class="small">参数校验</text>
+  <text x="366" y="212" class="small">依赖注入</text>
+
+  <rect x="632" y="118" width="264" height="108" class="core"/>
+  <text x="654" y="154" class="label">CustomerServiceAgent</text>
+  <text x="654" y="184" class="small">一轮问答编排中心</text>
+  <text x="654" y="206" class="small">组合 LLM / RAG / Tools</text>
+
+  <rect x="964" y="128" width="220" height="88" class="box"/>
+  <text x="986" y="162" class="label">返回响应</text>
+  <text x="986" y="190" class="small">answer / trace</text>
+  <text x="986" y="212" class="small">knowledge / tool_results</text>
+
+  <path class="line" d="M276 172 H344"/>
+  <path class="line" d="M564 172 H632"/>
+  <path class="line" d="M896 172 H964"/>
+
+  <rect x="56" y="302" width="238" height="104" class="store"/>
+  <text x="78" y="338" class="label">会话与消息</text>
+  <text x="78" y="366" class="small">MySQL conversations</text>
+  <text x="78" y="388" class="small">messages 保存上下文</text>
+
+  <rect x="348" y="302" width="238" height="104" class="store"/>
+  <text x="370" y="338" class="label">语义缓存</text>
+  <text x="370" y="366" class="small">Redis + Embedding</text>
+  <text x="370" y="388" class="small">相似问题复用答案</text>
+
+  <rect x="640" y="302" width="238" height="104" class="store"/>
+  <text x="662" y="338" class="label">RAG 检索</text>
+  <text x="662" y="366" class="small">Embedding 查询向量</text>
+  <text x="662" y="388" class="small">Qdrant 召回知识块</text>
+
+  <rect x="932" y="302" width="252" height="104" class="box"/>
+  <text x="954" y="338" class="label">构造 messages</text>
+  <text x="954" y="366" class="small">system prompt + knowledge</text>
+  <text x="954" y="388" class="small">history + user question</text>
+
+  <path class="line" d="M764 226 V264 H175 V302"/>
+  <path class="line" d="M764 226 V264 H467 V302"/>
+  <path class="line" d="M764 226 V302"/>
+  <path class="line" d="M294 354 H348"/>
+  <path class="line" d="M586 354 H640"/>
+  <path class="line" d="M878 354 H932"/>
+
+  <rect x="412" y="492" width="364" height="112" class="core"/>
+  <text x="434" y="528" class="label">LLM 决策</text>
+  <text x="434" y="558" class="small">chat(messages, tools=..., tool_choice="auto")</text>
+  <text x="434" y="582" class="small">模型决定直接回答或返回 tool_calls</text>
+
+  <rect x="86" y="622" width="236" height="86" class="box"/>
+  <text x="108" y="656" class="label">直接回答</text>
+  <text x="108" y="684" class="small">没有 tool_calls</text>
+
+  <rect x="474" y="622" width="236" height="86" class="tool"/>
+  <text x="496" y="656" class="label">Tool 调用</text>
+  <text x="496" y="684" class="small">后端执行真实业务动作</text>
+
+  <rect x="848" y="604" width="250" height="104" class="tool"/>
+  <text x="870" y="640" class="label">业务工具</text>
+  <text x="870" y="668" class="small">query_order_status</text>
+  <text x="870" y="690" class="small">create_refund_ticket / handoff</text>
+
+  <rect x="848" y="492" width="250" height="86" class="core"/>
+  <text x="870" y="526" class="label">二次 LLM</text>
+  <text x="870" y="554" class="small">根据 tool 结果整理话术</text>
+
+  <rect x="958" y="426" width="226" height="76" class="store"/>
+  <text x="980" y="460" class="label">保存结果</text>
+  <text x="980" y="486" class="small">MySQL + 可选 Redis</text>
+
+  <path class="line" d="M1058 406 V436 H776 V492"/>
+  <path class="line" d="M594 604 V622"/>
+  <path class="line" d="M594 604 V664 H322"/>
+  <path class="line" d="M710 665 H848"/>
+  <path class="line" d="M973 604 V578"/>
+  <path class="line" d="M973 492 V464 H958"/>
+  <path class="line" d="M322 665 H958 V502"/>
+  <path class="dash" d="M1071 426 V216"/>
+</svg>
