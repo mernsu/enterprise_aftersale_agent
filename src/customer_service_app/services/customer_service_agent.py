@@ -23,6 +23,7 @@ from customer_service_app.prompts.customer_service import (
     format_knowledge_context,
 )
 from customer_service_app.services.conversation_service import ConversationService
+from customer_service_app.services.question_preprocessor import QuestionPreprocessor
 from customer_service_app.services.rag_service import RagService
 from customer_service_app.services.tool_registry import ToolExecutionContext, ToolRegistry
 
@@ -54,6 +55,7 @@ class CustomerServiceAgent:
         self._search_client = search_client
         self._semantic_cache = semantic_cache
         self._conversation_service = ConversationService(session)
+        self._question_preprocessor = QuestionPreprocessor()
 
     async def answer(self, request: ChatRequest) -> ChatResponse:
         """处理一轮完整的客服问答。
@@ -64,6 +66,17 @@ class CustomerServiceAgent:
 
         # Trace records the main processing stages returned to the ops console.
         trace: list[ChatTraceStep] = []
+        question_profile = self._question_preprocessor.analyze(request.question)
+        if question_profile.normalized_question != request.question:
+            request = request.model_copy(update={"question": question_profile.normalized_question})
+        trace.append(
+            ChatTraceStep(
+                stage="preprocess",
+                detail="完成用户问题标准化和轻量意图识别",
+                metadata=question_profile.as_trace_metadata(),
+            )
+        )
+
         conversation = await self._conversation_service.ensure_conversation(
             tenant_id=request.tenant_id,
             user_id=request.user_id,
@@ -119,7 +132,8 @@ class CustomerServiceAgent:
 
         messages = await self._build_llm_messages(request, conversation.id, knowledge)
 
-        # Tool definitions are passed as a structured API parameter, not embedded in the user question.
+        # Tool definitions are passed as a structured API parameter.
+        # They are not embedded in the user question.
         first_response = await self._llm_client.chat(
             messages,
             tools=self._tool_registry.definitions(),
