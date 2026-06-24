@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ class ToolExecutionContext:
     conversation_id: str | None
     session: AsyncSession
     search_client: SerpApiSearchClient
+    confirmed_tools: set[str] = field(default_factory=set)
 
 
 ToolHandler = Callable[[dict[str, Any], ToolExecutionContext], Awaitable[dict[str, Any]]]
@@ -42,6 +43,7 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]
     handler: ToolHandler
+    requires_confirmation: bool = False
 
     def as_openai_tool(self) -> dict[str, Any]:
         """把内部 ToolSpec 转成 OpenAI-compatible tools 格式。
@@ -104,5 +106,26 @@ class ToolRegistry:
         try:
             arguments = json.loads(arguments_json or "{}")
         except json.JSONDecodeError as exc:
-            raise AppError(f"Invalid tool arguments for {name}: {arguments_json}") from exc
+            raise AppError(
+                f"Invalid tool arguments for {name}: {arguments_json}",
+                code="invalid_tool_arguments",
+                status_code=400,
+            ) from exc
+        if not isinstance(arguments, dict):
+            raise AppError(
+                "Tool arguments must be a JSON object",
+                code="invalid_tool_arguments",
+                status_code=400,
+            )
+
+        if tool.requires_confirmation:
+            confirmed_tools = context.confirmed_tools if context is not None else set()
+            if name not in confirmed_tools:
+                return {
+                    "requires_confirmation": True,
+                    "tool_name": name,
+                    "arguments": arguments,
+                    "message": "该操作需要用户或人工客服确认后再执行。",
+                }
+
         return await tool.handler(arguments, context)

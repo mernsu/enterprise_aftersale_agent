@@ -247,12 +247,18 @@ class CustomerServiceAgent:
                 "tool_calls": [call.as_openai_tool_call() for call in calls],
             }
         )
+        raw_confirmed_tools = request.metadata.get("confirmed_tools", [])
+        if isinstance(raw_confirmed_tools, str):
+            raw_confirmed_tools = [raw_confirmed_tools]
+        confirmed_tools = {str(item) for item in raw_confirmed_tools if str(item).strip()}
+
         context = ToolExecutionContext(
             tenant_id=request.tenant_id,
             user_id=request.user_id,
             conversation_id=conversation_id,
             session=self._session,
             search_client=self._search_client,
+            confirmed_tools=confirmed_tools,
         )
 
         tool_call_views: list[ToolCallView] = []

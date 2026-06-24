@@ -101,7 +101,7 @@ ORDER_STATUS_TOOL = ToolSpec(
 REFUND_TICKET_TOOL = ToolSpec(
     # 这个工具告诉模型：当用户明确要退款/退货退款时，可以调用 create_refund_ticket。
     name="create_refund_ticket",
-    description="当用户要申请退款或退货退款时，创建退款工单。",
+    description="当用户要申请退款或退货退款时，创建退款工单。该工具属于高风险写操作，需要确认后执行。",
     parameters={
         "type": "object",
         "properties": {
@@ -117,13 +117,14 @@ REFUND_TICKET_TOOL = ToolSpec(
         "additionalProperties": False,
     },
     handler=create_refund_ticket,
+    requires_confirmation=True,
 )
 
 
 HUMAN_HANDOFF_TOOL = ToolSpec(
     # 这个工具告诉模型：投诉升级、要求人工、无法处理时，可以创建人工客服工单。
     name="transfer_to_human",
-    description="当用户明确要求人工客服、投诉升级、情绪强烈或模型无法解决时创建人工客服工单。",
+    description="当用户明确要求人工客服、投诉升级、情绪强烈或模型无法解决时创建人工客服工单。该工具需要确认后执行。",
     parameters={
         "type": "object",
         "properties": {
@@ -138,4 +139,5 @@ HUMAN_HANDOFF_TOOL = ToolSpec(
         "additionalProperties": False,
     },
     handler=transfer_to_human,
+    requires_confirmation=True,
 )
