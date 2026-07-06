@@ -1,10 +1,8 @@
-# Enterprise Customer Service Agent
+# Enterprise Aftersale Agent
 
-一个面向企业售后客服场景的 AI Agent 后端练习项目。
+面向企业售后客服场景的 AI Agent 后端服务。
 
-在系统学习 Python、FastAPI、LLM 应用开发、RAG 和 Function Calling 之后整理的个人练习项目。项目目标不是做一个简单的聊天样例，而是把智能客服常见链路拆成可运行、可测试、可扩展的后端工程，便于继续学习和复盘。
-
-> 项目定位：个人学习项目。代码采用生产化分层结构和真实外部依赖接入方式，但不等同于已经上线的商业系统。
+将智能客服常见链路拆解为可运行、可测试、可扩展的后端工程，支持知识库检索、Function Calling、多轮对话记忆压缩等核心能力。
 
 ## Features
 
@@ -43,7 +41,7 @@
 ## Project Structure
 
 ```text
-enterprise-customer-service-agent/
+enterprise-aftersale-agent/
   Dockerfile
   docker-compose.yml
   pyproject.toml
