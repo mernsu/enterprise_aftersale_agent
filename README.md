@@ -103,9 +103,7 @@ QDRANT_COLLECTION=customer_service_knowledge
 创建虚拟环境、安装依赖并准备配置：
 
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync
 cp .env.example .env
 ```
 
@@ -118,20 +116,20 @@ docker compose up -d mysql redis qdrant
 检查配置：
 
 ```bash
-python scripts/check_env.py
+uv run python scripts/check_env.py
 ```
 
 初始化数据库并写入演示订单：
 
 ```bash
-python scripts/init_db.py
-python scripts/seed_demo_data.py
+uv run python scripts/init_db.py
+uv run python scripts/seed_demo_data.py
 ```
 
 导入样例知识库：
 
 ```bash
-python scripts/ingest_docs.py sample_knowledge --tenant-id default
+uv run python scripts/ingest_docs.py sample_knowledge --tenant-id default
 ```
 
 访问地址：
@@ -184,8 +182,8 @@ curl -X POST "https://www.bottlecz.cn/api/v1/chat" \
 ## Tests
 
 ```bash
-pytest -q
-ruff check src tests scripts
+uv run pytest -q
+uv run ruff check src tests scripts
 ```
 
 ## Current Scope

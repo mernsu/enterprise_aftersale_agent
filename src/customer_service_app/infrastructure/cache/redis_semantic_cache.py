@@ -8,8 +8,9 @@ from typing import Any
 import numpy as np
 import redis.asyncio as redis
 
+from langchain_core.embeddings import Embeddings
+
 from customer_service_app.core.config import Settings
-from customer_service_app.infrastructure.embeddings.base import EmbeddingClient
 
 
 @dataclass(slots=True)
@@ -33,10 +34,10 @@ class RedisSemanticCache:
     Redis Stack 向量检索或独立向量数据库。
     """
 
-    def __init__(self, settings: Settings, embedding_client: EmbeddingClient):
-        """注入配置和 embedding 客户端。"""
+    def __init__(self, settings: Settings, embedding_model: Embeddings):
+        """注入配置和 embedding 模型。"""
         self._settings = settings
-        self._embedding_client = embedding_client
+        self._embedding_model = embedding_model
         self._redis: redis.Redis | None = None
 
     @property
@@ -56,7 +57,7 @@ class RedisSemanticCache:
         3. 计算余弦相似度。
         4. 超过阈值时返回相似度最高的缓存答案。
         """
-        query_vector = await self._embedding_client.embed_query(question)
+        query_vector = await self._embedding_model.aembed_query(question)
         prefix = self._prefix(tenant_id, user_id)
         best: SemanticCacheEntry | None = None
 

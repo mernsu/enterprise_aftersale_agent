@@ -1,42 +1,57 @@
 from __future__ import annotations
 
-from customer_service_app.domain.schemas import ChatMessage
-from customer_service_app.services.conversation_memory import ConversationMemoryCompactor
+from langchain_core.messages import AIMessage, HumanMessage
+
+from customer_service_app.memory.chat_memory import DatabaseBackedChatMessageHistory
 
 
-def test_memory_compactor_keeps_short_history() -> None:
-    """历史不长时不需要压缩。"""
+class FakeMessage:
+    """Minimal fake to satisfy the interface expected by DatabaseBackedChatMessageHistory."""
 
-    history = [
-        ChatMessage(role="user", content="你好"),
-        ChatMessage(role="assistant", content="你好，有什么可以帮你？"),
-    ]
-
-    window = ConversationMemoryCompactor(max_history_messages=3).compact(history)
-
-    assert window.messages == history
-    assert window.compressed is False
-    assert window.compressed_count == 0
+    def __init__(self, role: str, content: str) -> None:
+        self.role = role
+        self.content = content
 
 
-def test_memory_compactor_summarizes_earlier_messages() -> None:
-    """历史过长时，较早消息会变成一条摘要，最近消息保留原文。"""
+class FakeRepo:
+    """Fake ConversationRepository that returns canned messages."""
 
-    history = [
-        ChatMessage(role="user", content=f"用户问题 {index}")
-        for index in range(1, 7)
-    ]
+    def __init__(self, messages: list[FakeMessage]) -> None:
+        self._messages = messages
+        self.appended: list[dict] = []
 
-    window = ConversationMemoryCompactor(
-        max_history_messages=4,
-        keep_recent_messages=2,
-    ).compact(history)
+    async def recent_messages(self, *, conversation_id: str, limit: int) -> list[FakeMessage]:
+        return self._messages[-limit:]
 
-    assert window.compressed is True
-    assert window.original_count == 6
-    assert window.compressed_count == 4
-    assert len(window.messages) == 3
-    assert window.messages[0].role == "system"
-    assert window.messages[0].metadata["memory_type"] == "history_summary"
-    assert "用户问题 1" in window.messages[0].content
-    assert window.messages[1:] == history[-2:]
+    async def append_message(self, *, conversation_id: str, role: str, content: str, metadata: dict | None = None) -> None:
+        self.appended.append({"role": role, "content": content})
+
+
+async def test_database_backed_history_loads_and_appends() -> None:
+    """加载历史返回 LangChain BaseMessage，追加时写回 repo。"""
+    repo = FakeRepo([
+        FakeMessage("user", "你好"),
+        FakeMessage("assistant", "你好，有什么可以帮你？"),
+    ])
+    history = DatabaseBackedChatMessageHistory("c001", repo, max_messages=10)
+    messages = await history.aget_messages()
+    assert len(messages) == 2
+    assert isinstance(messages[0], HumanMessage)
+    assert isinstance(messages[1], AIMessage)
+    assert messages[0].content == "你好"
+
+    await history.aadd_messages([HumanMessage(content="新问题")])
+    await history.aadd_messages([AIMessage(content="新回答")])
+    assert len(repo.appended) == 2
+
+
+async def test_database_backed_history_filters_system_messages() -> None:
+    """只有 user/assistant 消息被加载，system 消息应被过滤。"""
+    repo = FakeRepo([
+        FakeMessage("system", "摘要"),
+        FakeMessage("user", "问题"),
+    ])
+    history = DatabaseBackedChatMessageHistory("c001", repo, max_messages=10)
+    messages = await history.aget_messages()
+    assert len(messages) == 1
+    assert isinstance(messages[0], HumanMessage)

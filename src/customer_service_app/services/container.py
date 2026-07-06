@@ -1,46 +1,101 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from customer_service_app.agents.customer_service_agent import build_customer_service_graph
 from customer_service_app.core.config import get_settings
 from customer_service_app.infrastructure.cache.redis_semantic_cache import RedisSemanticCache
-from customer_service_app.infrastructure.embeddings.factory import build_embedding_client
-from customer_service_app.infrastructure.llm.openai_compatible import OpenAICompatibleLLMClient
+from customer_service_app.infrastructure.embeddings.langchain_factory import build_embedding_model
+from customer_service_app.infrastructure.llm.langchain_factory import build_chat_model
 from customer_service_app.infrastructure.search.serpapi_client import SerpApiSearchClient
-from customer_service_app.infrastructure.vector_store.qdrant_store import QdrantKnowledgeVectorStore
-from customer_service_app.services.customer_service_agent import CustomerServiceAgent
-from customer_service_app.services.rag_service import RagService
-from customer_service_app.tools.default_registry import build_default_tool_registry
+from customer_service_app.infrastructure.vector_store.langchain_store import TenantAwareQdrantStore
+from customer_service_app.tools.confirmation_gated_node import ConfirmationGatedToolNode
+from customer_service_app.tools.langchain_tools import (
+    CONFIRMATION_REQUIRED_TOOLS,
+    create_refund_ticket,
+    query_order_status,
+    search_public_web,
+    transfer_to_human,
+)
 
 
-def build_customer_service_agent(session: AsyncSession) -> CustomerServiceAgent:
-    """组装 CustomerServiceAgent 需要的所有依赖。
+@dataclass(slots=True)
+class AgentRuntime:
+    """Holds compiled graph and non-serializable objects for config injection."""
 
-    这个文件可以理解为轻量 DI 容器：
-    - 创建 LLM 客户端
-    - 创建 Embedding 客户端
-    - 创建 Qdrant/RAG/Redis/工具注册表
-    - 最后把它们注入到 Agent
+    graph: CompiledStateGraph
+    chat_model: object
+    embedding_model: object
+    qdrant_store: TenantAwareQdrantStore
+    semantic_cache: RedisSemanticCache | None
+    search_client: SerpApiSearchClient
+    tools: list
+    tool_node: ConfirmationGatedToolNode
 
-    Centralizing dependency construction keeps route handlers thin and makes providers replaceable.
-    """
+
+def build_langgraph_agent(session: AsyncSession) -> AgentRuntime:
+    """Assemble LangChain components and return the compiled graph + runtime."""
     settings = get_settings()
-    embedding_client = build_embedding_client(settings)
-    vector_store = QdrantKnowledgeVectorStore(settings)
-    rag_service = RagService(
-        settings=settings,
-        embedding_client=embedding_client,
-        vector_store=vector_store,
+
+    chat_model = build_chat_model(settings)
+    embedding_model = build_embedding_model(settings)
+    qdrant_store = TenantAwareQdrantStore(settings, embedding_model)
+    search_client = SerpApiSearchClient(settings)
+
+    semantic_cache: RedisSemanticCache | None = None
+    if settings.semantic_cache_enabled:
+        semantic_cache = RedisSemanticCache(settings, embedding_model)
+
+    tool_list = [
+        query_order_status,
+        search_public_web,
+        create_refund_ticket,
+        transfer_to_human,
+    ]
+    tool_node = ConfirmationGatedToolNode(
+        tool_list,
+        confirmation_required=CONFIRMATION_REQUIRED_TOOLS,
     )
-    semantic_cache = (
-        RedisSemanticCache(settings, embedding_client) if settings.semantic_cache_enabled else None
-    )
-    return CustomerServiceAgent(
-        settings=settings,
-        session=session,
-        llm_client=OpenAICompatibleLLMClient(settings),
-        rag_service=rag_service,
-        tool_registry=build_default_tool_registry(),
-        search_client=SerpApiSearchClient(settings),
+
+    graph = build_customer_service_graph()
+    return AgentRuntime(
+        graph=graph,
+        chat_model=chat_model,
+        embedding_model=embedding_model,
+        qdrant_store=qdrant_store,
         semantic_cache=semantic_cache,
+        search_client=search_client,
+        tools=tool_list,
+        tool_node=tool_node,
     )
+
+
+def build_config(
+    session: AsyncSession,
+    runtime: AgentRuntime,
+    *,
+    tenant_id: str,
+    user_id: str,
+    confirmed_tools: set[str] | None = None,
+) -> RunnableConfig:
+    """Build the RunnableConfig carrying all runtime dependencies."""
+    return {
+        "configurable": {
+            "session": session,
+            "settings": get_settings(),
+            "chat_model": runtime.chat_model,
+            "embedding_model": runtime.embedding_model,
+            "qdrant_store": runtime.qdrant_store,
+            "semantic_cache": runtime.semantic_cache,
+            "search_client": runtime.search_client,
+            "tools": runtime.tools,
+            "tool_node": runtime.tool_node,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "confirmed_tools": confirmed_tools or set(),
+        }
+    }

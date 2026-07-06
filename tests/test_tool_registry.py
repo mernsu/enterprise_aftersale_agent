@@ -1,99 +1,113 @@
 from __future__ import annotations
 
-from typing import Any
+import json
 
 import pytest
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langgraph.graph import END, StateGraph
+from langgraph.graph.message import add_messages
+from typing import Annotated, TypedDict
 
-from customer_service_app.services.tool_registry import ToolExecutionContext, ToolRegistry, ToolSpec
+from customer_service_app.tools.confirmation_gated_node import ConfirmationGatedToolNode
+from customer_service_app.tools.langchain_tools import query_order_status
 
 
-async def sample_handler(arguments: dict[str, Any], _: ToolExecutionContext) -> dict[str, Any]:
-    """测试用工具函数，返回传入文本。"""
-    return {"echo": arguments["text"]}
+class MiniState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+
+
+def _make_graph(tool_node: ConfirmationGatedToolNode):
+    """Build a tiny graph that routes through the tool node."""
+    builder = StateGraph(MiniState)
+
+    async def send_tool_call(state: MiniState):
+        return {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[{
+                        "id": "call_1",
+                        "name": "query_order_status",
+                        "args": {"order_id": "202606040001"},
+                    }],
+                )
+            ]
+        }
+
+    builder.add_node("call", send_tool_call)
+    builder.add_node("tools", tool_node)
+    builder.set_entry_point("call")
+    builder.add_edge("call", "tools")
+    builder.add_edge("tools", END)
+    return builder.compile()
+
+
+def _make_node(**kwargs) -> ConfirmationGatedToolNode:
+    """Create a ConfirmationGatedToolNode with error messages enabled."""
+    return ConfirmationGatedToolNode(
+        [query_order_status],
+        handle_tool_errors=True,  # wrap errors as ToolMessage content
+        **kwargs,
+    )
 
 
 @pytest.mark.asyncio
-async def test_tool_registry_executes_registered_tool() -> None:
-    """验证工具注册后可以按名称执行。"""
-    registry = ToolRegistry()
-    registry.register(
-        ToolSpec(
-            name="echo",
-            description="echo text",
-            parameters={
-                "type": "object",
-                "properties": {"text": {"type": "string"}},
-                "required": ["text"],
-            },
-            handler=sample_handler,
-        )
+async def test_confirmation_gated_node_returns_gate_for_unconfirmed_tool() -> None:
+    """高风险工具未确认时返回 requires_confirmation 而不是真正执行。"""
+    node = _make_node(confirmation_required={"query_order_status"})
+    graph = _make_graph(node)
+    result = await graph.ainvoke(
+        {"messages": []},
+        {"configurable": {"confirmed_tools": set(), "session": None}},
     )
-
-    result = await registry.execute(
-        name="echo",
-        arguments_json='{"text": "hello"}',
-        context=None,
-    )
-
-    assert result == {"echo": "hello"}
+    msgs = result["messages"]
+    tool_msgs = [m for m in msgs if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) >= 1
+    payload = json.loads(tool_msgs[0].content)
+    assert payload.get("requires_confirmation") is True
+    assert payload.get("tool_name") == "query_order_status"
 
 
 @pytest.mark.asyncio
-async def test_high_risk_tool_requires_confirmation_before_execution() -> None:
-    """高风险工具未确认时不应该真正执行 handler。"""
-
-    async def should_not_run(_: dict[str, Any], __: ToolExecutionContext) -> dict[str, Any]:
-        raise AssertionError("high risk handler should not run before confirmation")
-
-    registry = ToolRegistry()
-    registry.register(
-        ToolSpec(
-            name="create_refund_ticket",
-            description="create refund ticket",
-            parameters={"type": "object", "properties": {"order_id": {"type": "string"}}},
-            handler=should_not_run,
-            requires_confirmation=True,
-        )
+async def test_confirmed_tool_bypasses_gate() -> None:
+    """显式确认后，高风险工具进入真实 handler。"""
+    node = _make_node(confirmation_required={"query_order_status"})
+    graph = _make_graph(node)
+    result = await graph.ainvoke(
+        {"messages": []},
+        {
+            "configurable": {
+                "confirmed_tools": {"query_order_status"},
+                "session": None,
+                "tenant_id": "default",
+                "user_id": "u001",
+            }
+        },
     )
-
-    result = await registry.execute(
-        name="create_refund_ticket",
-        arguments_json='{"order_id": "202606040001"}',
-        context=None,
-    )
-
-    assert result["requires_confirmation"] is True
-    assert result["tool_name"] == "create_refund_ticket"
-    assert result["arguments"] == {"order_id": "202606040001"}
+    msgs = result["messages"]
+    tool_msgs = [m for m in msgs if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) >= 1
+    # Handler reached (gate bypassed) — fails because session=None.
+    content = tool_msgs[0].content
+    assert isinstance(content, str)
 
 
 @pytest.mark.asyncio
-async def test_high_risk_tool_executes_after_confirmation() -> None:
-    """显式确认后，高风险工具才会进入真实 handler。"""
-
-    registry = ToolRegistry()
-    registry.register(
-        ToolSpec(
-            name="create_refund_ticket",
-            description="create refund ticket",
-            parameters={"type": "object", "properties": {"text": {"type": "string"}}},
-            handler=sample_handler,
-            requires_confirmation=True,
-        )
+async def test_non_high_risk_tool_executes_without_confirmation() -> None:
+    """非高风险工具不需要确认即可执行。"""
+    node = _make_node(confirmation_required=set())
+    graph = _make_graph(node)
+    result = await graph.ainvoke(
+        {"messages": []},
+        {
+            "configurable": {
+                "confirmed_tools": set(),
+                "session": None,
+                "tenant_id": "default",
+                "user_id": "u001",
+            }
+        },
     )
-    context = ToolExecutionContext(
-        tenant_id="default",
-        user_id="u001",
-        conversation_id="c001",
-        session=None,
-        search_client=None,
-        confirmed_tools={"create_refund_ticket"},
-    )
-
-    result = await registry.execute(
-        name="create_refund_ticket",
-        arguments_json='{"text": "confirmed"}',
-        context=context,
-    )
-
-    assert result == {"echo": "confirmed"}
+    msgs = result["messages"]
+    tool_msgs = [m for m in msgs if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) >= 1

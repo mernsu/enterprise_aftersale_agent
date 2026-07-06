@@ -9,19 +9,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-# 让脚本可以直接导入 src/customer_service_app 里的项目代码。
 
 from customer_service_app.core.config import get_settings  # noqa: E402
 from customer_service_app.domain.schemas import KnowledgeChunk  # noqa: E402
-from customer_service_app.infrastructure.embeddings.factory import build_embedding_client  # noqa: E402
-from customer_service_app.infrastructure.vector_store.qdrant_store import QdrantKnowledgeVectorStore  # noqa: E402
+from customer_service_app.infrastructure.embeddings.langchain_factory import (  # noqa: E402
+    build_embedding_model,
+)
+from customer_service_app.infrastructure.vector_store.langchain_store import (  # noqa: E402
+    TenantAwareQdrantStore,
+)
 
 
 def split_text(text: str, chunk_size: int = 800, overlap: int = 120) -> list[str]:
-    """把长文档切成适合 embedding 的小块。
-
-    `overlap` 表示相邻 chunk 保留一部分重叠内容，避免答案刚好被切断。
-    """
+    """把长文档切成适合 embedding 的小块。"""
     chunks: list[str] = []
     start = 0
     while start < len(text):
@@ -36,12 +36,12 @@ def split_text(text: str, chunk_size: int = 800, overlap: int = 120) -> list[str
 async def ingest(directory: Path, tenant_id: str) -> None:
     """导入 Markdown 知识库到 Qdrant。
 
-    流程：读取 md -> 切 chunk -> 调 embedding -> 写入 Qdrant。
-    这就是 RAG 项目里“离线知识入库”的最小生产流程。
+    流程：读取 md → 切 chunk → 调 embedding → 写入 Qdrant。
+    这就是 RAG 项目里"离线知识入库"的最小生产流程。
     """
     settings = get_settings()
-    embedding_client = build_embedding_client(settings)
-    vector_store = QdrantKnowledgeVectorStore(settings)
+    embedding_model = build_embedding_model(settings)
+    qdrant_store = TenantAwareQdrantStore(settings, embedding_model)
 
     chunks: list[KnowledgeChunk] = []
     for path in directory.rglob("*.md"):
@@ -63,13 +63,33 @@ async def ingest(directory: Path, tenant_id: str) -> None:
         print("No markdown documents found.")
         return
 
-    vectors = await embedding_client.embed_documents([chunk.content for chunk in chunks])
-    await vector_store.upsert_chunks(tenant_id=tenant_id, chunks=chunks, vectors=vectors)
+    await qdrant_store.ensure_collection()
+    vectors = await embedding_model.aembed_documents([chunk.content for chunk in chunks])
+
+    # Build Qdrant points and upsert via the async client.
+    from qdrant_client.models import PointStruct
+
+    points: list[PointStruct] = []
+    for chunk, vector in zip(chunks, vectors):
+        payload = {
+            "tenant_id": tenant_id,
+            "source": chunk.source,
+            "title": chunk.title,
+            "content": chunk.content,
+            "score": chunk.score,
+            "chunk_id": chunk.id,
+            **chunk.metadata,
+        }
+        points.append(PointStruct(id=chunk.id, vector=vector, payload=payload))
+
+    await qdrant_store.client.upsert(
+        collection_name=settings.qdrant_collection,
+        points=points,
+    )
     print(f"Ingested {len(chunks)} chunks into Qdrant collection {settings.qdrant_collection}.")
 
 
 def parse_args() -> argparse.Namespace:
-    """解析命令行参数。"""
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
     parser.add_argument("--tenant-id", default="default")

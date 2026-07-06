@@ -7,10 +7,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from customer_service_app.core.exceptions import ConfigurationError
 
-
+#设置项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-
+#配置类，加载
 class Settings(BaseSettings):
     """Application settings loaded from environment variables or `.env`."""
 
